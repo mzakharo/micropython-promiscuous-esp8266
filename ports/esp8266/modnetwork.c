@@ -93,6 +93,130 @@ STATIC mp_obj_t esp_active(size_t n_args, const mp_obj_t *args) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(esp_active_obj, 1, 2, esp_active);
 
+/* Promiscous callback structures, see ESP manual */
+
+struct RxControl {
+	signed rssi:8;
+	unsigned rate:4;
+	unsigned is_group:1;
+	unsigned:1;
+	unsigned sig_mode:2;		// 0: is 11n packet; 1: is not 11n
+	unsigned legacy_length:12;	// if not 11n, shows length of packet
+	unsigned damatch0:1;
+	unsigned damatch1:1;
+	unsigned bssidmatch0:1;
+	unsigned bssidmatch1:1;
+	unsigned MCS:7;			// if 11n, shows modulation and code used (range from 0-76)
+	unsigned CWB:1;			// if 11n, shows if HT40 or not
+	unsigned HT_length:16;		// if 11n, shows length of packet
+	unsigned Smoothing:1;
+	unsigned Not_Sounding:1;
+	unsigned:1;
+	unsigned Aggregation:1;
+	unsigned STBC:2;
+	unsigned FEC_CODING:1;		// if 11n, shows if LDPC or not
+	unsigned SGI:1;
+	unsigned rxend_state:8;
+	unsigned ampdu_cnt:8;
+	unsigned channel:4;
+	unsigned:12;
+};
+
+struct sniffer_buf {
+	struct RxControl rx_ctrl;
+	uint8_t * buf;
+};
+
+struct wlan_frame {
+	uint16_t	fc;
+	uint16_t	duration;
+	uint8_t		addr1[6];
+	uint8_t		addr2[6];
+	uint8_t		addr3[6];
+	uint16_t	seq;
+	union {
+		uint16_t		qos;
+		uint8_t			addr4[6];
+		struct {
+			uint16_t	qos;
+			uint32_t	ht;
+		} __attribute__ ((packed)) ht;
+		struct {
+			uint8_t		addr4[6];
+			uint16_t	qos;
+			uint32_t	ht;
+		} __attribute__ ((packed)) addr4_qos_ht;
+	} u;
+} __attribute__ ((packed));
+#define le16toh(x)		(x)
+
+#define WLAN_FRAME_FC_TYPE_MASK		0x000C
+#define WLAN_FRAME_FC_STYPE_MASK	0x00F0
+
+#define WLAN_FRAME_FC_MASK		(WLAN_FRAME_FC_TYPE_MASK | WLAN_FRAME_FC_STYPE_MASK)
+
+#define WLAN_FRAME_TYPE(_fc)		((_fc & WLAN_FRAME_FC_TYPE_MASK) >> 2)
+#define WLAN_FRAME_FC(_type, _stype)	((((_type) << 2) | ((_stype) << 4)) & WLAN_FRAME_FC_MASK)
+#define WLAN_FRAME_TYPE_MGMT		0x0
+
+
+#define WLAN_FRAME_IS_MGMT(_fc)		(WLAN_FRAME_TYPE(_fc) == WLAN_FRAME_TYPE_MGMT)
+#define WLAN_FRAME_PROBE_REQ		WLAN_FRAME_FC(WLAN_FRAME_TYPE_MGMT, 0x4)
+#define WLAN_MAC_LEN		6
+
+STATIC mp_obj_t callback;
+STATIC void monitor_rx(uint8_t *buf, uint16_t len) {
+    if (len > 12) {
+        struct sniffer_buf* sb = (struct sniffer_buf*) buf;
+        struct wlan_frame* wh = (struct wlan_frame*) &sb->buf;
+        uint16_t fc = le16toh(wh->fc);
+        uint16_t wlan_type = (fc & WLAN_FRAME_FC_MASK);
+        if (WLAN_FRAME_IS_MGMT(fc) && wlan_type == WLAN_FRAME_PROBE_REQ) {
+            uint8_t* ta = wh->addr2;
+            nlr_buf_t nlr;
+            if (nlr_push(&nlr) == 0) {
+                mp_sched_schedule(callback, mp_obj_new_bytes(ta, WLAN_MAC_LEN));
+                nlr_pop();
+            } else {
+                mp_obj_print_exception(&mp_plat_print, MP_OBJ_FROM_PTR(nlr.ret_val));
+            }
+        }
+    }
+}
+
+STATIC mp_obj_t esp_promiscuous_enable(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_callback};
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_callback, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+    };
+    // parse args
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+    require_if(pos_args[0], STATION_IF);
+    
+    callback = args[ARG_callback].u_obj;
+	wifi_set_promiscuous_rx_cb(monitor_rx);
+	wifi_promiscuous_enable(1);
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_KW(esp_promiscuous_enable_obj, 1, esp_promiscuous_enable);
+
+STATIC mp_obj_t esp_promiscuous_disable(mp_obj_t self_in) {
+    wlan_if_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    require_if(self, STATION_IF);
+	wifi_promiscuous_enable(0);
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp_promiscuous_disable_obj, esp_promiscuous_disable);
+
+STATIC mp_obj_t esp_set_channel(mp_obj_t self_in, mp_obj_t ch_in) {
+    uint8_t ch = mp_obj_get_int(ch_in);
+    wifi_set_channel(ch);
+    return MP_OBJ_NEW_SMALL_INT(wifi_get_channel());
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(esp_set_channel_obj, esp_set_channel);
+
+
 STATIC mp_obj_t esp_connect(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     enum { ARG_ssid, ARG_password, ARG_bssid };
     static const mp_arg_t allowed_args[] = {
@@ -471,6 +595,9 @@ STATIC const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_isconnected), MP_ROM_PTR(&esp_isconnected_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&esp_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_ifconfig), MP_ROM_PTR(&esp_ifconfig_obj) },
+    { MP_ROM_QSTR(MP_QSTR_promiscuous_enable), MP_ROM_PTR(&esp_promiscuous_enable_obj) },
+    { MP_ROM_QSTR(MP_QSTR_promiscuous_disable), MP_ROM_PTR(&esp_promiscuous_disable_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_channel), MP_ROM_PTR(&esp_set_channel_obj) },
 };
 
 STATIC MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
