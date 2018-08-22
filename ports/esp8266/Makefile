@@ -16,8 +16,8 @@ FROZEN_MPY_DIR ?= modules
 include $(TOP)/py/py.mk
 
 FWBIN = $(BUILD)/firmware-combined.bin
-PORT ?= /dev/ttyACM0
-BAUD ?= 115200
+PORT ?= /dev/ttyUSB0
+BAUD ?= 921600
 FLASH_MODE ?= qio
 FLASH_SIZE ?= detect
 CROSS_COMPILE = xtensa-lx106-elf-
@@ -165,7 +165,7 @@ $(BUILD)/uart.o: $(CONFVARS_FILE)
 
 FROZEN_EXTRA_DEPS = $(CONFVARS_FILE)
 
-.PHONY: deploy
+.PHONY: deploy erase
 
 deploy: $(BUILD)/firmware-combined.bin
 	$(ECHO) "Writing $< to the board"
