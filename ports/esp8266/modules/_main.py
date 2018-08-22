@@ -1,0 +1,2 @@
+import mon
+mon.enable()
