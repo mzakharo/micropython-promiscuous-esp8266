@@ -6,7 +6,6 @@
 // see http://esp8266-re.foogod.com/wiki/Random_Number_Generator
 #define WDEV_HWRNG ((volatile uint32_t*)0x3ff20e44)
 
-void ets_delay_us(uint16_t us);
 void ets_intr_lock(void);
 void ets_intr_unlock(void);
 void ets_isr_mask(uint32_t mask);
