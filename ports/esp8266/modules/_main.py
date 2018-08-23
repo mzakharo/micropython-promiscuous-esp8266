@@ -1,2 +1,2 @@
 import mon
-mon.enable()
+mon.enable(schedule=True)
