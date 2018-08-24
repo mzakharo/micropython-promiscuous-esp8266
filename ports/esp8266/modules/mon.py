@@ -1,24 +1,33 @@
-import network
-import utime as time
+import time
 import os
-from micropython import const, schedule
+import network
 import machine
-#rtc = machine.RTC()
-#rtc.datetime((2018,8,22,2,11,18,0,0))
 
-BOOT_WAIT = const(10)
-MIN_15 = const(15*60)
-MIN_30 = const(30*60)
-#MIN_15 = const(10)
-#MIN_30 = const(10)
+DEBUG=False
+
+BOOT_WAIT = (10)
+
+if DEBUG:
+    MIN_15 = (10)
+    MIN_30 = (10)
+else:
+    MIN_15 = (15*60)
+    MIN_30 = (30*60)
 
 
 TIMER_PERIOD=MIN_30
 boot_time = time.time()
 
+ap_if = network.WLAN(network.AP_IF)
+ap_if.active(False)
+del ap_if
+sta_if = network.WLAN(network.STA_IF)
+sta_if.promiscuous_disable()
+sta_if.active(True)
+
 f = None
+
 def disable():
-    sta_if = network.WLAN(network.STA_IF)
     sta_if.promiscuous_disable()
     global f
     ret = False
@@ -31,7 +40,6 @@ def disable():
 
 
 def sleep(seconds):
-    #allow 15 min after manual reset to work with the device
     if ((time.time() - boot_time) > BOOT_WAIT or machine.reset_cause() == machine.DEEPSLEEP_RESET):
         if disable() is True: #only sleep if previously enabled
             os.umount('/')
@@ -93,15 +101,8 @@ def enable(ch=6, schedule=True):
         print('waiting 5 sec for user reset')
         time.sleep(5)
     else:
-        time.sleep(1)
-    #elif schedule:
-    #    timer_schedule()
+        time.sleep(1) #to allow for double reset to avoid DEEPSLEEP hang
     print("Promiscuous mode enable")
-    sta_if = network.WLAN(network.STA_IF)
-    sta_if.promiscuous_disable()
-    ap_if = network.WLAN(network.AP_IF)
-    ap_if.active(False)
-    sta_if.active(True)
     global f
     print("Channel {}".format(sta_if.set_channel(ch)))
     f = open('log.txt', 'a')
