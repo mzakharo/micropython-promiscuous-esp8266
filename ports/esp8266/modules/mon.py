@@ -8,14 +8,15 @@ DEBUG=False
 BOOT_WAIT = (10)
 
 if DEBUG:
+    MIN_5 = (10)
     MIN_15 = (10)
     MIN_30 = (10)
 else:
+    MIN_5 = (5*60)
     MIN_15 = (15*60)
     MIN_30 = (30*60)
 
-
-TIMER_PERIOD=MIN_30
+MON_PERIOD=MIN_5
 boot_time = time.time()
 
 ap_if = network.WLAN(network.AP_IF)
@@ -46,7 +47,7 @@ def sleep(seconds):
             rtc = machine.RTC()
             rtc.irq(trigger=rtc.ALARM0, wake=machine.DEEPSLEEP)
             rtc.alarm(rtc.ALARM0, seconds * 1000)
-            print('put the device to sleep')
+            print('sleep')
             machine.deepsleep()
 
 def mac_to_str(a):
@@ -63,9 +64,9 @@ day = {0 : 'mon',
         6 : 'sun',
         }
 
-def get_whm():
+def get_time():
     t = time.localtime(time.time())
-    return (day[t[6]],t[3],t[4])
+    return (day[t[6]],t[3],t[4], t[1], t[2])
 
 macs = {}
 
@@ -77,23 +78,23 @@ def monitor(mac_in):
             macs[mac] = None
         else:
             suffix = 'L'
-        whm = get_whm()
-        s ="{}-{}-{}\n".format(whm,mac, suffix)
+        t = get_time()
+        s ="{}-{}-{}\n".format(t,mac,suffix)
         print(s, end="")
         f.write(s)
         sleep(MIN_15)
 
-def sleep_schedule(whm):
-    wkd,hour,_ = whm
-    if (hour >= 6 and hour <=20) and (wkd in ['sat', 'sun'] or hour >= 16):
+def sleep_schedule(t):
+    wkd,hour,_,_,_ = t 
+    if (hour >= 6 and hour <=19) and (wkd in ['sat', 'sun'] or hour >= 16):
         return False
     return True #sleep sleep sleep
 
 
-def timer_schedule(self=None):
-    whm = get_whm()
-    print('{}-timer'.format(whm))
-    if sleep_schedule(whm):
+def check_schedule(self=None):
+    t = get_time()
+    print('{}-sched'.format(t))
+    if sleep_schedule(t):
         sleep(MIN_30)
 
 def enable(ch=6, schedule=True):
@@ -101,21 +102,18 @@ def enable(ch=6, schedule=True):
         print('waiting 5 sec for user reset')
         time.sleep(5)
     else:
-        time.sleep(1) #to allow for double reset to avoid DEEPSLEEP hang
-    print("Promiscuous mode enable")
+        time.sleep(1) #to allow for manual double reset to avoid DEEPSLEEP hang
     global f
-    print("Channel {}".format(sta_if.set_channel(ch)))
+    print("Promiscuous mode on channel {}".format(sta_if.set_channel(ch)))
     f = open('log.txt', 'a')
-    f.write("{}-started\n".format(get_whm()))
+    f.write("{}-started\n".format(get_time()))
+    if schedule:
+        check_schedule()
     sta_if.promiscuous_enable(monitor)
     if schedule:
-        #tim = machine.Timer(-1)
-        #tim.init(period=TIMER_PERIOD * 1000, mode=machine.Timer.PERIODIC, callback=timer_schedule)
-        #timer causes crashes with monitor callbacks, things probably need to be in critical section, implement while True for now
         try:
-            while True:
-                timer_schedule()
-                time.sleep(TIMER_PERIOD)
+            time.sleep(MON_PERIOD)
+            sleep(MIN_15)
         except:
             raise
         finally:
