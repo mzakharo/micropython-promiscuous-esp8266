@@ -41,10 +41,8 @@ def setup():
     with open("boot.py", "w") as f:
         f.write("""\
 # This file is executed on every boot (including wake-boot from deepsleep)
-print("boot script")
 import esp
 esp.osdebug(None)
-import gc
-gc.collect()
+del esp
 """)
     return vfs
